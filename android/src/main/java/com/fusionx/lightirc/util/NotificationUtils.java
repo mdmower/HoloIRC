@@ -13,7 +13,6 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.graphics.Typeface;
@@ -25,6 +24,7 @@ import android.os.Vibrator;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.app.RemoteInput;
+import android.support.v4.content.ContextCompat;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
@@ -45,10 +45,14 @@ import co.fusionx.relay.event.channel.ChannelActionEvent;
 import co.fusionx.relay.event.channel.ChannelMessageEvent;
 import co.fusionx.relay.event.channel.ChannelWorldActionEvent;
 import co.fusionx.relay.event.channel.ChannelWorldMessageEvent;
+import co.fusionx.relay.event.channel.ChannelWorldUserEvent;
 import co.fusionx.relay.event.query.QueryActionSelfEvent;
 import co.fusionx.relay.event.query.QueryActionWorldEvent;
+import co.fusionx.relay.event.query.QueryEvent;
 import co.fusionx.relay.event.query.QueryMessageSelfEvent;
 import co.fusionx.relay.event.query.QueryMessageWorldEvent;
+import co.fusionx.relay.event.query.QuerySelfEvent;
+import co.fusionx.relay.event.query.QueryWorldEvent;
 
 import static android.content.Context.VIBRATOR_SERVICE;
 import static android.media.RingtoneManager.TYPE_NOTIFICATION;
@@ -113,6 +117,7 @@ public class NotificationUtils {
         int queryCount;
         final List<NotificationMessageInfo> messages;
         final Map<Conversation, Integer> subNotificationIds;
+        final Map<Conversation, List<CharSequence>> replies;
         final int notificationIdBase;
         int nextSubNotificationId;
 
@@ -123,6 +128,7 @@ public class NotificationUtils {
             notificationIdBase =
                     NOTIFICATION_MENTION_BASE + index * NOTIFICATION_MENTION_SERVER_OFFSET;
             subNotificationIds = new HashMap<>();
+            replies = new HashMap<>();
             nextSubNotificationId = 1;
         }
         public int getNextSubNotificationId() {
@@ -168,7 +174,6 @@ public class NotificationUtils {
         final Server server = conversation.getServer();
         final Set<String> outApp = AppPreferences.getAppPreferences()
                 .getOutOfAppNotificationSettings();
-        final NotificationManagerCompat nm = NotificationManagerCompat.from(context);
 
         NotificationServerInfo serverInfo = sNotificationInfos.get(server.getId());
         if (serverInfo == null) {
@@ -182,28 +187,59 @@ public class NotificationUtils {
             serverInfo.queryCount++;
         }
 
-        NotificationMessageInfo messageInfo = null;
         if (message != null) {
             if (serverInfo.messages.size() >= MAX_NOTIFICATIONS_PER_SERVER) {
                 serverInfo.messages.remove(0);
             }
-            messageInfo = new NotificationMessageInfo(context,
-                    user, conversation, message, channel, timestamp);
-            serverInfo.messages.add(messageInfo);
+            serverInfo.messages.add(new NotificationMessageInfo(context,
+                    user, conversation, message, channel, timestamp));
+            serverInfo.replies.remove(conversation);
+        }
+
+        int defaults = 0;
+        if (outApp.contains(context.getString(R.string.notification_value_audio))) {
+            defaults |= Notification.DEFAULT_SOUND;
+        }
+        if (outApp.contains(context.getString(R.string.notification_value_vibrate))) {
+            defaults |= Notification.DEFAULT_VIBRATE;
+        }
+        if (outApp.contains(context.getString(R.string.notification_value_lights))) {
+            defaults |= Notification.DEFAULT_LIGHTS;
+        }
+
+        postNotification(context, defaults, conversation, channel);
+    }
+
+    public static void handleNotificationReply(final Context context,
+            final Conversation<? extends Event> conversation,
+            final boolean channel, final CharSequence message) {
+        final Server server = conversation.getServer();
+
+        NotificationServerInfo serverInfo = sNotificationInfos.get(server.getId());
+        if (serverInfo == null) {
+            return;
+        }
+        List<CharSequence> replies = serverInfo.replies.get(conversation);
+        if (replies == null) {
+            replies = new ArrayList<>();
+            serverInfo.replies.put(conversation, replies);
+        }
+        replies.add(0, message);
+
+        postNotification(context, 0, conversation, channel);
+    }
+
+    private static void postNotification(final Context context, int defaults,
+            final Conversation<? extends Event> conversation, final boolean channel) {
+        final NotificationManagerCompat nm = NotificationManagerCompat.from(context);
+        final Server server = conversation.getServer();
+
+        NotificationServerInfo serverInfo = sNotificationInfos.get(server.getId());
+        if (serverInfo == null) {
+            return;
         }
 
         int totalNotificationCount = serverInfo.mentionCount + serverInfo.queryCount;
-        final NotificationCompat.Builder builder = new NotificationCompat.Builder(context)
-                .setSmallIcon(R.drawable.ic_notification_small)
-                .setContentTitle(context.getString(R.string.app_name))
-                .setAutoCancel(true)
-                .setNumber(totalNotificationCount)
-                .setColor(context.getResources().getColor(R.color.colorPrimary))
-                .setCategory(NotificationCompat.CATEGORY_EMAIL)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setGroup(server.getId())
-                .setGroupSummary(true);
-
         final Intent contentIntent = new Intent(context, MainActivity.class);
         contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
                 | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -212,17 +248,25 @@ public class NotificationUtils {
 
         final PendingIntent contentPendingIntent = PendingIntent.getActivity(context,
                 serverInfo.notificationIdBase, contentIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-        builder.setContentIntent(contentPendingIntent);
 
         // First build the public version...
-        builder.setContentText(buildNotificationContentTextWithCounts(context, serverInfo));
-        builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
-
-        final Notification publicVersion = builder.build();
+        final NotificationCompat.Builder publicBuilder = createBaseNotificationBuilder(context)
+                .setContentText(buildNotificationContentTextWithCounts(context, serverInfo))
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setContentIntent(contentPendingIntent)
+                .setNumber(totalNotificationCount)
+                .setGroup(server.getId())
+                .setGroupSummary(true);
 
         // ... and now the private one
-        builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE);
-        builder.setPublicVersion(publicVersion);
+        final NotificationCompat.Builder privateBuilder = createBaseNotificationBuilder(context)
+                .setPublicVersion(publicBuilder.build())
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setContentIntent(contentPendingIntent)
+                .setNumber(totalNotificationCount)
+                .setDefaults(defaults)
+                .setGroup(server.getId())
+                .setGroupSummary(true);
 
         final String text;
         if (totalNotificationCount == 1) {
@@ -232,12 +276,13 @@ public class NotificationUtils {
 
             // For PMs, make sure to not include the sender's name in the
             // message (it's part of the title already)
+            NotificationMessageInfo messageInfo = serverInfo.messages.get(0);
             final CharSequence bigTextMessage = messageInfo != null && messageInfo.mention
-                    ? messageInfo.messageWithPrependedNick() : message;
+                    ? messageInfo.messageWithPrependedNick() : messageInfo.message;
             if (bigTextMessage != null) {
                 String title = context.getString(R.string.notification_mentioned_bigtext_title,
                         conversation.getId(), server.getId());
-                builder.setStyle(new NotificationCompat.BigTextStyle()
+                privateBuilder.setStyle(new NotificationCompat.BigTextStyle()
                         .bigText(ensureMinimumSize(bigTextMessage))
                         .setBigContentTitle(title));
             }
@@ -252,106 +297,105 @@ public class NotificationUtils {
                 }
 
                 style.setSummaryText(server.getId());
-                builder.setStyle(style);
+                privateBuilder.setStyle(style);
             }
         }
 
-        builder.setContentText(text);
-        builder.setTicker(text);
-
-        int defaults = 0;
-        if (outApp.contains(context.getString(R.string.notification_value_audio))) {
-            defaults |= Notification.DEFAULT_SOUND;
-        }
-        if (outApp.contains(context.getString(R.string.notification_value_vibrate))) {
-            defaults |= Notification.DEFAULT_VIBRATE;
-        }
-        if (outApp.contains(context.getString(R.string.notification_value_lights))) {
-            defaults |= Notification.DEFAULT_LIGHTS;
-        }
-
-        builder.setDefaults(defaults);
+        privateBuilder.setContentText(text);
+        privateBuilder.setTicker(text);
 
         final Intent intent = new Intent(context, NotificationEventReceiver.class);
         intent.setAction(CANCEL_NOTIFICATION_ACTION);
         intent.putExtra("server_id", server.getId());
         final PendingIntent deleteIntent = PendingIntent.getBroadcast(context,
                 serverInfo.notificationIdBase, intent, PendingIntent.FLAG_UPDATE_CURRENT);
-        builder.setDeleteIntent(deleteIntent);
+        privateBuilder.setDeleteIntent(deleteIntent);
 
-        nm.notify(serverInfo.notificationIdBase, builder.build());
+        nm.notify(serverInfo.notificationIdBase, privateBuilder.build());
+
+        Integer subNotifId = serverInfo.subNotificationIds.get(conversation);
+        if (subNotifId == null) {
+            subNotifId = serverInfo.getNextSubNotificationId();
+            serverInfo.subNotificationIds.put(conversation, subNotifId);
+        }
+
+        SpannableStringBuilder convText = new SpannableStringBuilder();
+        List<NotificationMessageInfo> convInfos = new ArrayList<>();
+        for (NotificationMessageInfo info : serverInfo.messages) {
+            if (info.conversation != conversation) {
+                continue;
+            }
+            if (convText.length() != 0) {
+                convText.append("\n");
+            }
+            if (info.mention) {
+                int currentPos = convText.length();
+                convText.append(info.user.getNickAsString());
+                convText.setSpan(new StyleSpan(Typeface.ITALIC), currentPos, convText.length(),
+                        Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
+                convText.append(" ");
+            }
+            convText.append(info.message);
+            convInfos.add(info);
+        }
+
+        final String replyLabel = context.getString(R.string.notification_reply_wear_title,
+                conversation.getId());
+        final RemoteInput remoteInput = new RemoteInput.Builder("reply")
+                .setLabel(replyLabel)
+                .build();
+        final Intent replyIntent = new Intent(context, NotificationEventReceiver.class);
+        replyIntent.setAction(VOICE_REPLY_NOTIFICATION_ACTION);
+        replyIntent.putExtra("server_name", server.getTitle());
+        replyIntent.putExtra("channel", channel);
+        replyIntent.putExtra("conversation_id", conversation.getId());
+
+        final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(context,
+                serverInfo.notificationIdBase + subNotifId, replyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+        final NotificationCompat.Action replyAction = new NotificationCompat.Action.Builder(
+                R.drawable.ic_reply,
+                context.getString(R.string.notification_action_reply),
+                replyPendingIntent)
+                .addRemoteInput(remoteInput)
+                .build();
+
+        final NotificationCompat.WearableExtender wearableExtender =
+                new NotificationCompat.WearableExtender().addAction(replyAction);
 
         if (isWearAppInstalled(context)) {
-            Integer subNotifId = serverInfo.subNotificationIds.get(conversation);
-            if (subNotifId == null) {
-                subNotifId = serverInfo.getNextSubNotificationId();
-                serverInfo.subNotificationIds.put(conversation, subNotifId);
-            }
-
-            SpannableStringBuilder convText = new SpannableStringBuilder();
-            List<NotificationMessageInfo> convInfos = new ArrayList<>();
-            for (NotificationMessageInfo info : serverInfo.messages) {
-                if (info.conversation != conversation) {
-                    continue;
-                }
-                if (convText.length() != 0) {
-                    convText.append("\n");
-                }
-                if (info.mention) {
-                    int currentPos = convText.length();
-                    convText.append(info.user.getNickAsString());
-                    convText.setSpan(new StyleSpan(Typeface.ITALIC), currentPos, convText.length(),
-                            Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
-                    convText.append(" ");
-                }
-                convText.append(info.message);
-                convInfos.add(info);
-            }
-
             CharSequence conversationLog = buildConversationLogForWear(context,
                     conversation, convInfos);
             final Notification convLogPage = new NotificationCompat.Builder(context)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(conversationLog))
                     .extend(new NotificationCompat.WearableExtender().setStartScrollBottom(true))
                     .build();
-
-            final String replyLabel = context.getString(R.string.notification_reply_wear_title,
-                    conversation.getId());
-            final RemoteInput remoteInput = new RemoteInput.Builder("reply")
-                    .setLabel(replyLabel)
-                    .build();
-            final Intent replyIntent = new Intent(context, NotificationEventReceiver.class);
-            replyIntent.setAction(VOICE_REPLY_NOTIFICATION_ACTION);
-            replyIntent.putExtra("server_name", server.getTitle());
-            replyIntent.putExtra("channel", channel);
-            replyIntent.putExtra("conversation_id", conversation.getId());
-
-            final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(context,
-                    serverInfo.notificationIdBase + subNotifId, replyIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT);
-            final NotificationCompat.Action replyAction = new NotificationCompat.Action.Builder(
-                    R.drawable.ic_reply,
-                    context.getString(R.string.notification_action_reply),
-                    replyPendingIntent)
-                    .addRemoteInput(remoteInput)
-                    .build();
-
-            final NotificationCompat.Builder stackBuilder = new NotificationCompat.Builder(context)
-                    .setSmallIcon(R.drawable.ic_notification_small)
-                    .setContentTitle(context.getString(
-                            R.string.notification_mentioned_bigtext_title,
-                            conversation.getId(), server.getId()))
-                    .setContentText(convText)
-                    .setColor(context.getResources().getColor(R.color.colorPrimary))
-                    .setCategory(NotificationCompat.CATEGORY_EMAIL)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setGroup(server.getId())
-                    .extend(new NotificationCompat.WearableExtender()
-                            .addPage(convLogPage)
-                            .addAction(replyAction));
-
-            nm.notify(serverInfo.notificationIdBase + subNotifId, stackBuilder.build());
+            wearableExtender.addPage(convLogPage);
         }
+
+        final List<CharSequence> replies = serverInfo.replies.get(conversation);
+        final CharSequence[] replyArray = replies != null
+                ? replies.toArray(new CharSequence[replies.size()]) : null;
+        final NotificationCompat.Builder stackBuilder = createBaseNotificationBuilder(context)
+                .setContentTitle(context.getString(
+                        R.string.notification_mentioned_bigtext_title,
+                        conversation.getId(), server.getId()))
+                .setContentText(convText)
+                .setGroup(server.getId())
+                .setRemoteInputHistory(replyArray)
+                .extend(wearableExtender);
+
+        nm.notify(serverInfo.notificationIdBase + subNotifId, stackBuilder.build());
+    }
+
+    private static NotificationCompat.Builder createBaseNotificationBuilder(Context context) {
+        return new android.support.v7.app.NotificationCompat.Builder(context)
+                .setSmallIcon(R.drawable.ic_notification_small)
+                .setContentTitle(context.getString(R.string.app_name))
+                .setAutoCancel(true)
+                .setColor(ContextCompat.getColor(context, R.color.colorPrimary))
+                .setCategory(NotificationCompat.CATEGORY_EMAIL)
+                .setPriority(NotificationCompat.PRIORITY_HIGH);
     }
 
     private static boolean shouldIncludeEventInConversationLog(Event e) {
@@ -413,7 +457,7 @@ public class NotificationUtils {
 
         EventCache cache = IRCService.getEventCache(conversation.getServer(), false);
         SpannableStringBuilder convLog = new SpannableStringBuilder();
-        int skippedColor = context.getResources().getColor(R.color.light_grey);
+        int skippedColor = ContextCompat.getColor(context, R.color.light_grey);
 
         for (Object o : logEntries) {
             if (o instanceof Integer) {

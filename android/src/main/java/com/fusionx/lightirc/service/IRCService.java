@@ -188,14 +188,16 @@ public class IRCService extends Service {
                 if (channelName != null) {
                     Optional<? extends Channel> channel =
                             server.getUserChannelInterface().getChannel(channelName);
-                    if (channel.isPresent()) {
-                        UserInputParser.onParseChannelMessage(channel.get(), message.toString());
+                    if (channel.isPresent() &&
+                            UserInputParser.onParseChannelMessage(channel.get(), message.toString())) {
+                        NotificationUtils.handleNotificationReply(this, channel.get(), true, message);
                     }
                 } else if (queryNick != null) {
                     Optional<? extends QueryUser> user =
                             server.getUserChannelInterface().getQueryUser(queryNick);
-                    if (user.isPresent()) {
-                        UserInputParser.onParseUserMessage(user.get(), message.toString());
+                    if (user.isPresent() &&
+                            UserInputParser.onParseUserMessage(user.get(), message.toString())) {
+                        NotificationUtils.handleNotificationReply(this, user.get(), false, message);
                     }
                 }
             }
