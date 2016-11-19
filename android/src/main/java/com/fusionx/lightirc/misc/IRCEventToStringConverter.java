@@ -8,11 +8,15 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
+import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.style.BackgroundColorSpan;
+import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.text.style.UnderlineSpan;
+import android.view.View;
+import android.widget.Toast;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -252,6 +256,20 @@ public class IRCEventToStringConverter {
                     int bg = formatColorToColor(span.bgColor, colorPalette);
                     if (bg != 0) {
                         formattedMessage.addSpan(new BackgroundColorSpan(bg), start, end);
+                    }
+                    if (fg != 0 && fg == bg) {
+                        formattedMessage.addSpan(new ClickableSpan() {
+                            @Override
+                            public void updateDrawState(TextPaint ds) {
+                                // don't call super method, we don't want look'n'feel of a link
+                            }
+                            @Override
+                            public void onClick(View view) {
+                                SpannableStringBuilder builder = new SpannableStringBuilder(message);
+                                builder.setSpan(new StyleSpan(Typeface.BOLD), start, end, 0);
+                                Toast.makeText(mContext, builder, Toast.LENGTH_LONG).show();
+                            }
+                        }, start, end);
                     }
                     break;
                 }

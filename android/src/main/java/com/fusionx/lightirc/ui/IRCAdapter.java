@@ -11,6 +11,7 @@ import com.fusionx.lightirc.util.UIUtils;
 
 import android.content.Context;
 import android.support.v7.widget.RecyclerView;
+import android.text.method.LinkMovementMethod;
 import android.text.util.Linkify;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -135,6 +136,7 @@ public class IRCAdapter<T extends Event> extends RecyclerView.Adapter<IRCAdapter
 
         UIUtils.setRobotoLight(mContext, holder.message);
         holder.message.setTextSize(AppPreferences.getAppPreferences().getMainFontSize());
+        holder.message.setMovementMethod(LinkMovementMethod.getInstance());
 
         return view;
     }
