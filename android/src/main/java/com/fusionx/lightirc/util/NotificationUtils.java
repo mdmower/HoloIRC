@@ -251,7 +251,8 @@ public class NotificationUtils {
 
         // First build the public version...
         final NotificationCompat.Builder publicBuilder = createBaseNotificationBuilder(context)
-                .setContentText(buildNotificationContentTextWithCounts(context, serverInfo))
+                .setContentText(buildNotificationContentTextWithCounts(context,
+                        serverInfo.mentionCount, serverInfo.queryCount))
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setContentIntent(contentPendingIntent)
                 .setNumber(totalNotificationCount)
@@ -287,7 +288,8 @@ public class NotificationUtils {
                         .setBigContentTitle(title));
             }
         } else {
-            text = buildNotificationContentTextWithCounts(context, serverInfo);
+            text = buildNotificationContentTextWithCounts(context,
+                    serverInfo.mentionCount, serverInfo.queryCount);
 
             if (!serverInfo.messages.isEmpty()) {
                 NotificationCompat.InboxStyle style = new NotificationCompat.InboxStyle();
@@ -376,12 +378,19 @@ public class NotificationUtils {
         final List<CharSequence> replies = serverInfo.replies.get(conversation);
         final CharSequence[] replyArray = replies != null
                 ? replies.toArray(new CharSequence[replies.size()]) : null;
+        final NotificationCompat.Builder publicStackBuilder = createBaseNotificationBuilder(context)
+                .setContentTitle(context.getString(R.string.app_name))
+                .setContentText(buildNotificationContentTextWithCounts(context,
+                        channel ? convInfos.size() : 0, channel ? 0 : convInfos.size()))
+                .setVisibility(Notification.VISIBILITY_PUBLIC);
         final NotificationCompat.Builder stackBuilder = createBaseNotificationBuilder(context)
                 .setContentTitle(context.getString(
                         R.string.notification_mentioned_bigtext_title,
                         conversation.getId(), server.getId()))
                 .setContentText(convText)
                 .setContentIntent(contentPendingIntent)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicStackBuilder.build())
                 .setGroup(server.getId())
                 .setRemoteInputHistory(replyArray)
                 .extend(wearableExtender);
@@ -494,20 +503,18 @@ public class NotificationUtils {
     }
 
     private static String buildNotificationContentTextWithCounts(Context context,
-            NotificationServerInfo info) {
-        if (info.queryCount > 0 && info.mentionCount > 0) {
+            int mentionCount, int queryCount) {
+        if (queryCount > 0 && mentionCount > 0) {
             Resources res = context.getResources();
             String mentions = res.getQuantityString(R.plurals.mention,
-                    info.mentionCount, info.mentionCount);
+                    mentionCount, mentionCount);
             String queries = res.getQuantityString(R.plurals.query,
-                    info.queryCount, info.queryCount);
+                    queryCount, queryCount);
             return mentions + ", " + queries;
-        } else if (info.mentionCount > 0) {
-            return context.getString(R.string.notification_mentioned_multi_title,
-                    info.mentionCount);
+        } else if (mentionCount > 0) {
+            return context.getString(R.string.notification_mentioned_multi_title, mentionCount);
         } else {
-            return context.getString(R.string.notification_queried_multi_title,
-                    info.queryCount);
+            return context.getString(R.string.notification_queried_multi_title, queryCount);
         }
     }
 
