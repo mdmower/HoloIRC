@@ -381,6 +381,7 @@ public class NotificationUtils {
                         R.string.notification_mentioned_bigtext_title,
                         conversation.getId(), server.getId()))
                 .setContentText(convText)
+                .setContentIntent(contentPendingIntent)
                 .setGroup(server.getId())
                 .setRemoteInputHistory(replyArray)
                 .extend(wearableExtender);

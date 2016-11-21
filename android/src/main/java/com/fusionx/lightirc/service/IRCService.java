@@ -27,6 +27,7 @@ import android.os.Environment;
 import android.os.IBinder;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
+import android.support.v4.content.ContextCompat;
 import android.text.TextUtils;
 import android.util.Pair;
 
@@ -414,25 +415,10 @@ public class IRCService extends Service {
 
         }
 
-        final NotificationCompat.Builder builder = new NotificationCompat.Builder(this);
-        builder.setColor(getResources().getColor(R.color.colorPrimary));
-        builder.setContentTitle(getString(R.string.app_name));
-        builder.setSmallIcon(R.drawable.ic_notification_small);
-        builder.setContentIntent(getMainActivityIntent());
-        builder.setPriority(disconnectedCount > 0
-                ? NotificationCompat.PRIORITY_DEFAULT : NotificationCompat.PRIORITY_MIN);
-        builder.setCategory(NotificationCompat.CATEGORY_SERVICE);
-        builder.setOngoing(true);
-        builder.setLocalOnly(true);
-        builder.setShowWhen(false);
-        builder.setContentText(publicText);
-        builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
-        if (disconnectedCount > 0) {
-            builder.setGroup("serverstatus");
-            builder.setGroupSummary(true);
-        }
-
-        Notification publicVersion = builder.build();
+        final Notification publicVersion = createBaseNotificationBuilder(disconnectedCount > 0)
+                .setContentText(publicText)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .build();
         final String text;
 
         if (totalCount == 1) {
@@ -451,10 +437,11 @@ public class IRCService extends Service {
             text = publicText.toString();
         }
 
-        builder.setContentText(text);
-        builder.setTicker(text);
-        builder.setPublicVersion(publicVersion);
-        builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE);
+        final NotificationCompat.Builder privateBuilder = createBaseNotificationBuilder(disconnectedCount > 0)
+                .setContentText(text)
+                .setTicker(text)
+                .setPublicVersion(publicVersion)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE);
 
         NotificationCompat.Action reconnectAction = null;
 
@@ -467,7 +454,7 @@ public class IRCService extends Service {
             reconnectAction = new NotificationCompat.Action(
                     R.drawable.ic_refresh_light,
                     getString(reconnectActionResId), reconnectIntent);
-            builder.addAction(reconnectAction);
+            privateBuilder.addAction(reconnectAction);
         }
 
         final PendingIntent intent = PendingIntent.getBroadcast(this, 0,
@@ -481,9 +468,9 @@ public class IRCService extends Service {
                     ? R.string.notification_action_disconnect_all
                     : R.string.notification_action_disconnect;
         }
-        builder.addAction(R.drawable.ic_clear_light, getString(disconnectActionResId), intent);
+        privateBuilder.addAction(R.drawable.ic_clear_light, getString(disconnectActionResId), intent);
 
-        mNotification = builder.build();
+        mNotification = privateBuilder.build();
         // make ourself persistent
         startService(new Intent(this, IRCService.class));
         startForeground(SERVICE_ID, mNotification);
@@ -491,15 +478,14 @@ public class IRCService extends Service {
         NotificationManagerCompat nm = NotificationManagerCompat.from(this);
 
         if (reconnectAction != null) {
-            NotificationCompat.Builder wearableStatusBuilder = new NotificationCompat.Builder(this);
-            wearableStatusBuilder.setColor(getResources().getColor(R.color.colorPrimary));
-            wearableStatusBuilder.setContentTitle(
-                    getString(R.string.notification_reconnect_wear_title));
-            wearableStatusBuilder.setContentText(getString(
-                    R.string.notification_reconnect_wear_content,
-                    TextUtils.join(", ", disconnectedServerNames)));
-            wearableStatusBuilder.setSmallIcon(R.drawable.ic_notification_small);
-            wearableStatusBuilder.setGroup("serverstatus");
+            NotificationCompat.Builder wearableStatusBuilder = new NotificationCompat.Builder(this)
+                    .setColor(ContextCompat.getColor(this, R.color.colorPrimary))
+                    .setContentTitle(getString(R.string.notification_reconnect_wear_title))
+                    .setContentText(getString(R.string.notification_reconnect_wear_content,
+                            TextUtils.join(", ", disconnectedServerNames)))
+                    .setContentIntent(reconnectAction.getActionIntent())
+                    .setSmallIcon(R.drawable.ic_notification_small)
+                    .setGroup("serverstatus");
 
             reconnectAction.icon = R.drawable.ic_refresh_action_wear;
             new NotificationCompat.WearableExtender()
@@ -512,6 +498,26 @@ public class IRCService extends Service {
         } else {
             nm.cancel(WEARABLE_STATUS_ID);
         }
+    }
+
+    private NotificationCompat.Builder createBaseNotificationBuilder(boolean hasDisconnected) {
+        final int priority = hasDisconnected
+                ? NotificationCompat.PRIORITY_DEFAULT : NotificationCompat.PRIORITY_MIN;
+        final NotificationCompat.Builder builder = new NotificationCompat.Builder(this)
+                .setColor(ContextCompat.getColor(this, R.color.colorPrimary))
+                .setContentTitle(getString(R.string.app_name))
+                .setSmallIcon(R.drawable.ic_notification_small)
+                .setContentIntent(getMainActivityIntent())
+                .setPriority(priority)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setOngoing(true)
+                .setLocalOnly(true)
+                .setShowWhen(false);
+        if (hasDisconnected) {
+            builder.setGroup("serverstatus");
+            builder.setGroupSummary(true);
+        }
+        return builder;
     }
 
     // Binder which returns this service
