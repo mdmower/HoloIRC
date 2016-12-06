@@ -1,0 +1,6 @@
+[submodule "libraries/bus"]
+	path = libraries/bus
+	url = https://github.com/tilal6991/Bus
+[submodule "libraries/relay"]
+	path = libraries/relay
+	url = https://github.com/maniac103/Relay
