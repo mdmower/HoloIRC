@@ -54,7 +54,7 @@ android {
         internal {
             applicationId = android.defaultConfig.applicationId
             versionName = android.defaultConfig.versionName
-            ext.enableCrashlytics = true
+            ext.enableCrashlytics = false
         }
     }
 
