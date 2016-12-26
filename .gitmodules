@@ -1,8 +1,8 @@
 [submodule "libraries/bus"]
 	path = libraries/bus
-	url = https://github.com/tilal6991/Bus
-	branch = develop
+	url = https://github.com/mdmower/Bus
+	branch = master
 [submodule "libraries/relay"]
 	path = libraries/relay
-	url = https://github.com/maniac103/Relay
+	url = https://github.com/mdmower/Relay
 	branch = master
